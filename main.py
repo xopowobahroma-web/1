@@ -4,12 +4,14 @@ import logging
 from flask import Flask, request
 import telebot
 from telebot import types
-from database_sync import Database  # наш синхронный класс
+from database_sync import Database
+from ai_integration import HuggingFaceClient
 
+# Настройка логирования
 logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# --- Инициализация базы ---
+# --- Инициализация базы данных ---
 try:
     db = Database()
     logger.info("✅ База данных инициализирована")
@@ -23,12 +25,19 @@ if not BOT_TOKEN:
     logger.error("❌ BOT_TOKEN не задан!")
     sys.exit(1)
 
+# --- Hugging Face клиент ---
+try:
+    hf_client = HuggingFaceClient()
+    logger.info("✅ Hugging Face клиент инициализирован")
+except Exception as e:
+    logger.exception("❌ Ошибка инициализации Hugging Face")
+    sys.exit(1)
+
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# --- Вспомогательные функции для диалогов ---
+# --- Вспомогательные функции ---
 def get_user_id_or_start_dialog(message):
-    """Проверяет, есть ли пользователь в БД, и возвращает его id или начинает диалог с /start"""
     try:
         user = db.get_or_create_user(message.from_user.id)
         return user['id']
@@ -37,23 +46,23 @@ def get_user_id_or_start_dialog(message):
         bot.reply_to(message, "❌ Ошибка доступа к базе. Попробуй позже.")
         return None
 
-# --- Обработчик отмены диалога ---
+# --- Обработчик отмены ---
 @bot.message_handler(commands=['cancel'])
 def cancel_dialog(message):
     bot.reply_to(message, "❌ Диалог отменён. Можешь начать заново.")
-    # Здесь можно сбросить состояние, но мы не храним состояния, поэтому просто ответ
 
-# --- КОМАНДА /sleep ---
-# Храним временные данные в словаре, привязанном к chat.id (простой способ без состояний)
+# --- Словари для временного хранения данных диалогов ---
 sleep_data = {}
+mood_data = {}
+trigger_data = {}
 
+# ---------- КОМАНДА /sleep ----------
 @bot.message_handler(commands=['sleep'])
 def cmd_sleep(message):
     user_id = get_user_id_or_start_dialog(message)
     if not user_id:
         return
     chat_id = message.chat.id
-    # Инициализируем словарь для этого пользователя
     sleep_data[chat_id] = {'user_id': user_id, 'step': 'start_time'}
     bot.reply_to(message, "🌙 Введи время начала сна (например, 2025-03-12 23:00 или оставь пустым для текущего времени):")
     bot.register_next_step_handler(message, process_sleep_start)
@@ -63,13 +72,12 @@ def process_sleep_start(message):
     if message.text == '/cancel':
         cancel_dialog(message)
         return
-    # Сохраняем время начала
     from datetime import datetime
     try:
         if message.text.strip():
             sleep_start = datetime.fromisoformat(message.text.strip())
         else:
-            sleep_start = None  # позже установим как NOW() в БД? Но в add_sleep_log может быть None, тогда NULL
+            sleep_start = None
         sleep_data[chat_id]['start'] = sleep_start
     except ValueError:
         bot.reply_to(message, "❌ Неверный формат. Попробуй ещё раз или отправь /cancel")
@@ -144,9 +152,7 @@ def process_sleep_triggered(message):
         logger.exception("Ошибка сохранения сна")
         bot.reply_to(message, "❌ Ошибка при сохранении. Попробуй позже.")
 
-# --- КОМАНДА /mood ---
-mood_data = {}
-
+# ---------- КОМАНДА /mood ----------
 @bot.message_handler(commands=['mood'])
 def cmd_mood(message):
     user_id = get_user_id_or_start_dialog(message)
@@ -209,9 +215,7 @@ def process_mood_thoughts(message):
         logger.exception("Ошибка сохранения настроения")
         bot.reply_to(message, "❌ Ошибка при сохранении.")
 
-# --- КОМАНДА /triggers ---
-trigger_data = {}
-
+# ---------- КОМАНДА /triggers ----------
 @bot.message_handler(commands=['triggers'])
 def cmd_trigger(message):
     user_id = get_user_id_or_start_dialog(message)
@@ -258,7 +262,7 @@ def process_trigger_category(message):
         logger.exception("Ошибка сохранения триггера")
         bot.reply_to(message, "❌ Ошибка при сохранении.")
 
-# --- КОМАНДА /start (обновлена с учётом базы) ---
+# ---------- КОМАНДА /start ----------
 @bot.message_handler(commands=['start'])
 def start(message):
     logger.info(f"Команда /start от {message.chat.id}")
@@ -270,19 +274,19 @@ def start(message):
                               "/mood — записать настроение\n"
                               "/triggers — добавить триггер\n"
                               "/stats — статистика\n"
-                              "/cancel — отменить текущий диалог")
+                              "/cancel — отменить текущий диалог\n\n"
+                              "Просто отправь мне сообщение, и я постараюсь ответить с учётом твоего контекста.")
     except Exception as e:
         logger.exception("Ошибка при обработке /start")
         bot.reply_to(message, "Произошла ошибка, попробуй позже.")
 
-# --- КОМАНДА /stats (расширенная) ---
+# ---------- КОМАНДА /stats ----------
 @bot.message_handler(commands=['stats'])
 def stats(message):
     logger.info(f"Команда /stats от {message.chat.id}")
     try:
         user = db.get_or_create_user(message.from_user.id)
         moods = db.get_recent_mood(user['id'], limit=3)
-        # Можно добавить статистику по сну и триггерам, но для простоты оставим так
         reply = "📊 **Последние записи настроения:**\n"
         if moods:
             for m in moods:
@@ -290,8 +294,7 @@ def stats(message):
         else:
             reply += "Нет данных о настроении.\n"
 
-        # Сон (последние 3 записи)
-        sleeps = db.get_sleep_stats(user['id'], days=30)  # последние 30 дней
+        sleeps = db.get_sleep_stats(user['id'], days=30)
         reply += "\n🌙 **Последние записи сна:**\n"
         if sleeps:
             for s in sleeps[-3:]:
@@ -299,20 +302,69 @@ def stats(message):
         else:
             reply += "Нет данных о сне.\n"
 
+        triggers = db.get_recent_triggers? # У нас нет такого метода, но можно добавить позже.
+        # Пока без триггеров в статистике
         bot.reply_to(message, reply, parse_mode='Markdown')
     except Exception as e:
         logger.exception("Ошибка при обработке /stats")
         bot.reply_to(message, "Не удалось получить статистику.")
 
-# --- Обработчик всех текстовых сообщений (если не команда и не в диалоге) ---
+# ---------- ОСНОВНОЙ ОБРАБОТЧИК ТЕКСТОВЫХ СООБЩЕНИЙ (НЕ КОМАНД) ----------
+# Этот обработчик будет вызываться для всех сообщений, которые не являются командами
+# и не обрабатываются в диалогах (так как register_next_step_handler перехватывает следующие сообщения)
 @bot.message_handler(func=lambda message: True)
-def fallback(message):
-    # Если сообщение не является командой и не обрабатывается в диалогах, просто игнорируем или отвечаем
-    # Но чтобы не мешать диалогам, можно отвечать только если не в процессе
-    # Упрощённо: отвечаем эхом, но это может мешать диалогам. Лучше напоминать о командах.
-    bot.reply_to(message, "Используй команды: /start, /sleep, /mood, /triggers, /stats, /cancel")
+def handle_message(message):
+    # Проверяем, не находится ли пользователь в активном диалоге (по наличию в sleep_data, mood_data, trigger_data)
+    # Это грубая проверка, но для простоты допустим.
+    if message.chat.id in sleep_data or message.chat.id in mood_data or message.chat.id in trigger_data:
+        # Сообщение должно обрабатываться соответствующим шагом диалога, а не здесь.
+        # Если мы сюда попали, значит что-то пошло не так. Просто проигнорируем.
+        return
 
-# --- Вебхук ---
+    logger.info(f"Обработка обычного сообщения от {message.chat.id}: {message.text[:50]}...")
+    try:
+        user = db.get_or_create_user(message.from_user.id)
+        user_id = user['id']
+
+        # Сохраняем сообщение пользователя
+        db.add_conversation(user_id, 'user', message.text, None)
+
+        # Формируем контекст для Hugging Face
+        context = "Ты — эксперт в области сомнологии, химических зависимостей и психологии. Твоя задача — помогать пользователю анализировать его сон, настроение и триггеры, используя глубокое понимание этих тем. Отвечай информативно, но кратко. Используй данные из истории диалога для персонализации.\n\n"
+
+        # Добавляем последние 5 диалогов
+        convs = db.get_recent_conversations(user_id, limit=5)
+        if convs:
+            context += "Последние сообщения:\n"
+            for c in convs:
+                context += f"{c['role']}: {c['message']}\n"
+
+        # Добавляем последнее настроение
+        moods = db.get_recent_mood(user_id, limit=1)
+        if moods:
+            m = moods[0]
+            context += f"Последнее настроение: стресс {m['stress_level']}, мысли об употреблении: {m['thoughts_about_use']}\n"
+
+        # Добавляем последний сон
+        sleeps = db.get_sleep_stats(user_id, days=7)
+        if sleeps:
+            last_sleep = sleeps[-1]
+            context += f"Последний сон: начался {last_sleep['sleep_start']}, закончился {last_sleep['sleep_end']}\n"
+
+        # Получаем ответ от Hugging Face
+        reply = hf_client.ask(message.text, context)
+
+        # Сохраняем ответ ассистента
+        db.add_conversation(user_id, 'assistant', reply, None)
+
+        # Отправляем ответ пользователю
+        bot.reply_to(message, reply)
+
+    except Exception as e:
+        logger.exception("Ошибка при обработке обычного сообщения")
+        bot.reply_to(message, "Произошла внутренняя ошибка, попробуй позже.")
+
+# ---------- ВЕБХУК ----------
 @app.route('/webhook', methods=['POST'])
 def webhook():
     logger.debug("🔥 Вебхук вызван!")
