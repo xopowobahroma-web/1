@@ -7,7 +7,6 @@ from telebot import types
 from database_sync import Database
 from ai_integration import HuggingFaceClient
 
-# Настройка логирования
 logging.basicConfig(stream=sys.stderr, level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
@@ -49,6 +48,7 @@ def get_user_id_or_start_dialog(message):
 # --- Обработчик отмены ---
 @bot.message_handler(commands=['cancel'])
 def cancel_dialog(message):
+    logger.debug("🔥 cancel_dialog вызван")
     bot.reply_to(message, "❌ Диалог отменён. Можешь начать заново.")
 
 # --- Словари для временного хранения данных диалогов ---
@@ -59,6 +59,7 @@ trigger_data = {}
 # ---------- КОМАНДА /sleep ----------
 @bot.message_handler(commands=['sleep'])
 def cmd_sleep(message):
+    logger.debug("🔥 cmd_sleep вызван")
     user_id = get_user_id_or_start_dialog(message)
     if not user_id:
         return
@@ -155,6 +156,7 @@ def process_sleep_triggered(message):
 # ---------- КОМАНДА /mood ----------
 @bot.message_handler(commands=['mood'])
 def cmd_mood(message):
+    logger.debug("🔥 cmd_mood вызван")
     user_id = get_user_id_or_start_dialog(message)
     if not user_id:
         return
@@ -218,6 +220,7 @@ def process_mood_thoughts(message):
 # ---------- КОМАНДА /triggers ----------
 @bot.message_handler(commands=['triggers'])
 def cmd_trigger(message):
+    logger.debug("🔥 cmd_trigger вызван")
     user_id = get_user_id_or_start_dialog(message)
     if not user_id:
         return
@@ -265,7 +268,7 @@ def process_trigger_category(message):
 # ---------- КОМАНДА /start ----------
 @bot.message_handler(commands=['start'])
 def start(message):
-    logger.info(f"Команда /start от {message.chat.id}")
+    logger.debug("🔥 start вызван")
     try:
         user = db.get_or_create_user(message.from_user.id)
         bot.reply_to(message, f"Привет! Ты в системе. Твой ID: {user['id']}\n"
@@ -283,7 +286,7 @@ def start(message):
 # ---------- КОМАНДА /stats ----------
 @bot.message_handler(commands=['stats'])
 def stats(message):
-    logger.info(f"Команда /stats от {message.chat.id}")
+    logger.debug("🔥 stats вызван")
     try:
         user = db.get_or_create_user(message.from_user.id)
         moods = db.get_recent_mood(user['id'], limit=3)
@@ -302,23 +305,18 @@ def stats(message):
         else:
             reply += "Нет данных о сне.\n"
 
-        triggers = db.get_recent_triggers # У нас нет такого метода, но можно добавить позже.
-        # Пока без триггеров в статистике
         bot.reply_to(message, reply, parse_mode='Markdown')
     except Exception as e:
         logger.exception("Ошибка при обработке /stats")
         bot.reply_to(message, "Не удалось получить статистику.")
 
 # ---------- ОСНОВНОЙ ОБРАБОТЧИК ТЕКСТОВЫХ СООБЩЕНИЙ (НЕ КОМАНД) ----------
-# Этот обработчик будет вызываться для всех сообщений, которые не являются командами
-# и не обрабатываются в диалогах (так как register_next_step_handler перехватывает следующие сообщения)
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
-    # Проверяем, не находится ли пользователь в активном диалоге (по наличию в sleep_data, mood_data, trigger_data)
-    # Это грубая проверка, но для простоты допустим.
+    logger.debug("🔥🔥🔥 HANDLE_MESSAGE ВЫЗВАН 🔥🔥🔥")
+    # Проверяем, не находится ли пользователь в активном диалоге
     if message.chat.id in sleep_data or message.chat.id in mood_data or message.chat.id in trigger_data:
-        # Сообщение должно обрабатываться соответствующим шагом диалога, а не здесь.
-        # Если мы сюда попали, значит что-то пошло не так. Просто проигнорируем.
+        logger.debug("Пользователь в диалоге, игнорируем обычный обработчик")
         return
 
     logger.info(f"Обработка обычного сообщения от {message.chat.id}: {message.text[:50]}...")
@@ -385,4 +383,3 @@ def index():
     return "Bot is running!"
 
 logger.info("🎯 main.py полностью загружен, ожидаем запросы")
-
