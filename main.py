@@ -35,6 +35,9 @@ app = Flask(__name__)
 
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
+# Хранилище для сбора длинных текстов (ключ – chat_id)
+history_buffer = {}
+
 def send_message(chat_id: int, text: str):
     logger.debug(f"Отправка сообщения в чат {chat_id}: {text[:50]}...")
     url = f"{TELEGRAM_API_URL}/sendMessage"
@@ -79,16 +82,50 @@ def webhook():
         send_message(chat_id, "❌ Ошибка доступа к базе данных.")
         return 'ok', 200
 
-    # Сохраняем сообщение пользователя
-    try:
-        db.add_conversation(user_id, 'user', text, None)
-        logger.debug("Сообщение пользователя сохранено")
-    except Exception as e:
-        logger.exception("Ошибка сохранения диалога")
+    # Сохраняем сообщение пользователя (кроме команд, которые не должны попадать в историю)
+    if not text.startswith('/'):
+        try:
+            db.add_conversation(user_id, 'user', text, None)
+            logger.debug("Сообщение пользователя сохранено")
+        except Exception as e:
+            logger.exception("Ошибка сохранения диалога")
 
-    # --- Команда /remember для сохранения факта ---
+    # --- Команда /remember_start (начать сбор истории) ---
+    if text == '/remember_start':
+        history_buffer[chat_id] = []
+        send_message(chat_id, "📝 Отправляй текст частями. Когда закончишь, напиши /remember_stop [ключ]")
+        return 'ok', 200
+
+    # --- Команда /remember_stop [ключ] (сохранить накопленное) ---
+    if text.startswith('/remember_stop'):
+        if chat_id not in history_buffer or not history_buffer[chat_id]:
+            send_message(chat_id, "❌ Нет накопленного текста. Сначала отправь /remember_start")
+            return 'ok', 200
+
+        # Разбираем ключ (если есть)
+        parts = text.split(maxsplit=1)
+        key = parts[1].strip() if len(parts) > 1 else 'история'
+
+        full_text = "\n".join(history_buffer[chat_id])
+        try:
+            db.add_memory(user_id, key, full_text)
+            send_message(chat_id, f"✅ История сохранена под ключом «{key}»")
+        except Exception as e:
+            logger.exception("Ошибка сохранения памяти")
+            send_message(chat_id, "❌ Не удалось сохранить историю.")
+
+        # Очищаем буфер
+        del history_buffer[chat_id]
+        return 'ok', 200
+
+    # --- Если пользователь в режиме сбора истории ---
+    if chat_id in history_buffer:
+        history_buffer[chat_id].append(text)
+        # Не отвечаем, просто копим
+        return 'ok', 200
+
+    # --- Команда /remember для быстрого сохранения одного факта ---
     if text.startswith('/remember'):
-        # Ожидаем формат: /remember ключ: значение
         try:
             parts = text.split(':', 1)
             if len(parts) == 2:
@@ -108,11 +145,14 @@ def webhook():
 
     # --- Команда /start ---
     if text.startswith('/start'):
-        reply = (f"Привет, {first_name}! Я твой помощник.\n"
-                 "Чтобы я запомнил важные факты о тебе (например, историю травм, паттерны), используй команду:\n"
-                 "/remember ключ: значение\n"
-                 "Например: /remember травма: в детстве упал с велосипеда\n\n"
-                 "Я буду помнить эти факты в каждом разговоре.")
+        reply = (f"Привет, {first_name}! Я твой помощник.\n\n"
+                 "📌 **Как я могу помочь?**\n"
+                 "Я помню историю диалога и могу запоминать важные факты о тебе.\n\n"
+                 "**Команды:**\n"
+                 "/remember ключ: значение – сохранить один факт\n"
+                 "/remember_start – начать ввод длинной истории (например, биографии)\n"
+                 "/remember_stop [ключ] – закончить ввод и сохранить историю\n\n"
+                 "Просто общайся со мной – я буду учитывать всё, что ты рассказал.")
         send_message(chat_id, reply)
         try:
             db.add_conversation(user_id, 'assistant', reply, None)
