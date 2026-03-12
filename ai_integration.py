@@ -1,41 +1,42 @@
 import os
-from huggingface_hub import InferenceClient
+import requests
 import logging
 
 logger = logging.getLogger(__name__)
 
-class HuggingFaceClient:
+class LLMClient:
     def __init__(self):
-        self.api_key = os.environ.get('HUGGINGFACE_API_KEY')
+        self.api_key = os.environ.get('OPENROUTER_API_KEY')
         if not self.api_key:
-            logger.error("❌ HUGGINGFACE_API_KEY не задан в окружении!")
-            raise ValueError("HUGGINGFACE_API_KEY не задан")
-        self.model = os.environ.get('HUGGINGFACE_MODEL', 'mistralai/Mistral-7B-Instruct-v0.2')
-        self.client = InferenceClient(
-            token=self.api_key,
-            model=self.model,
-            timeout=30
-        )
-        logger.info(f"HuggingFaceClient инициализирован с моделью {self.model}")
-    
+            logger.error("❌ OPENROUTER_API_KEY не задан!")
+            raise ValueError("OPENROUTER_API_KEY не задан")
+        self.base_url = "https://openrouter.ai/api/v1/chat/completions"
+        # Используем бесплатную модель Hunter Alpha
+        self.model = "openrouter/hunter-alpha"
+        logger.info(f"✅ LLM Client инициализирован с моделью {self.model}")
+
     def ask(self, user_message: str, context: str) -> str:
         try:
-            # Формируем сообщения в формате chat
-            messages = [
-                {"role": "system", "content": context},
-                {"role": "user", "content": user_message}
-            ]
-            # Используем chat_completion для instruct-моделей
-            response = self.client.chat_completion(
-                messages=messages,
-                max_tokens=500,
-                temperature=0.7,
-                top_p=0.9
+            response = requests.post(
+                url=self.base_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": context},
+                        {"role": "user", "content": user_message}
+                    ],
+                    "max_tokens": 500,
+                    "temperature": 0.7
+                },
+                timeout=30
             )
-            if response and response.choices:
-                return response.choices[0].message.content
-            else:
-                return "Извини, я не получил осмысленного ответа от модели."
+            response.raise_for_status()
+            data = response.json()
+            return data['choices'][0]['message']['content']
         except Exception as e:
-            logger.exception(f"Hugging Face API Error: {e}")
-            return "Извини, сейчас я временно недоступен. Расскажи, как ты?"
+            logger.exception(f"❌ Ошибка OpenRouter API: {e}")
+            return "Извини, сейчас я временно недоступен. Попробуй позже."
