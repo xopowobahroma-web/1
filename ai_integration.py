@@ -37,3 +37,4 @@ class HuggingFaceClient:
         except Exception as e:
             logger.exception(f"Hugging Face API Error: {e}")
             return "Извини, сейчас я временно недоступен. Расскажи, как ты?"
+
