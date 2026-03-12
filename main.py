@@ -74,6 +74,8 @@ def webhook():
     # Получаем или создаём пользователя в БД
     try:
         user = db.get_or_create_user(user_telegram_id)
+        if user is None:
+            raise Exception("User creation failed")
         user_id = user['id']
         logger.debug(f"Пользователь {user_id} обработан")
     except Exception as e:
@@ -134,3 +136,4 @@ def index():
 
 if __name__ == '__main__':
     app.run()
+
