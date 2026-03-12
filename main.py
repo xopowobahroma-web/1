@@ -1,6 +1,7 @@
 import os
 import sys
 import logging
+import requests
 from flask import Flask, request
 from database_sync import Database
 from ai_integration import LLMClient
@@ -35,19 +36,22 @@ app = Flask(__name__)
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 def send_message(chat_id: int, text: str):
+    logger.debug(f"Отправка сообщения в чат {chat_id}: {text[:50]}...")
     url = f"{TELEGRAM_API_URL}/sendMessage"
     payload = {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML'}
     try:
-        requests.post(url, json=payload, timeout=5)
+        r = requests.post(url, json=payload, timeout=5)
+        r.raise_for_status()
         logger.debug(f"✅ Сообщение отправлено в чат {chat_id}")
     except Exception as e:
-        logger.exception(f"❌ Ошибка отправки: {e}")
+        logger.exception(f"❌ Ошибка отправки сообщения: {e}")
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     logger.debug("🔥 Вебхук вызван")
     try:
         update = request.get_json()
+        logger.debug(f"Получен update: {update}")
     except Exception as e:
         logger.exception("❌ Ошибка парсинга JSON")
         return 'error', 400
@@ -61,12 +65,15 @@ def webhook():
     user_telegram_id = msg['from']['id']
     first_name = msg['from'].get('first_name', '')
 
+    logger.debug(f"Обработка сообщения от {user_telegram_id}: {text[:50]}...")
+
     # Работа с пользователем в БД
     try:
         user = db.get_or_create_user(user_telegram_id)
         if user is None:
             raise Exception("User creation failed")
         user_id = user['id']
+        logger.debug(f"Пользователь {user_id} обработан")
     except Exception as e:
         logger.exception("Ошибка БД")
         send_message(chat_id, "❌ Ошибка доступа к базе данных.")
@@ -75,6 +82,7 @@ def webhook():
     # Сохраняем сообщение пользователя
     try:
         db.add_conversation(user_id, 'user', text, None)
+        logger.debug("Сообщение пользователя сохранено")
     except Exception as e:
         logger.exception("Ошибка сохранения диалога")
 
@@ -84,6 +92,7 @@ def webhook():
         send_message(chat_id, reply)
         try:
             db.add_conversation(user_id, 'assistant', reply, None)
+            logger.debug("Ответ на /start сохранён")
         except Exception as e:
             logger.exception("Ошибка сохранения ответа")
         return 'ok', 200
@@ -98,15 +107,19 @@ def webhook():
                 context += "Последние сообщения:\n"
                 for c in convs:
                     context += f"{c['role']}: {c['message']}\n"
+            logger.debug("Контекст сформирован")
         except Exception as e:
             logger.exception("Ошибка получения истории")
 
         # Получаем ответ от нейросети
+        logger.debug("Запрос к LLM...")
         reply = llm_client.ask(text, context)
+        logger.debug(f"Ответ от LLM получен: {reply[:100]}...")
 
         send_message(chat_id, reply)
         try:
             db.add_conversation(user_id, 'assistant', reply, None)
+            logger.debug("Ответ LLM сохранён в БД")
         except Exception as e:
             logger.exception("Ошибка сохранения ответа")
 
