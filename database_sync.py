@@ -10,7 +10,6 @@ from functools import wraps
 logger = logging.getLogger(__name__)
 
 def retry_on_db_error(max_retries=5, delay=1):
-    """Декоратор для повторных попыток при ошибках базы данных (теперь 5 попыток)."""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -47,10 +46,8 @@ class Database:
             self.pool.closeall()
 
     def _get_connection(self):
-        """Возвращает рабочее соединение из пула, проверяя его жизнеспособность."""
         conn = self.pool.getconn()
         try:
-            # Проверяем соединение лёгким запросом
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
         except Exception as e:
@@ -64,6 +61,7 @@ class Database:
             return [desc[0] for desc in cursor.description]
         return []
 
+    # ----- Users -----
     @retry_on_db_error()
     def get_or_create_user(self, telegram_id: int):
         conn = self._get_connection()
@@ -87,17 +85,10 @@ class Database:
                     else:
                         raise Exception("Failed to create user: no row returned")
         except Exception:
-            # В случае любой ошибки возвращаем соединение (но не закрываем)
             self.pool.putconn(conn)
             raise
         else:
-            # Если всё ок, возвращаем соединение в пул
             self.pool.putconn(conn)
-
-    # Аналогично модифицируем остальные методы, заменяя self.pool.getconn() на self._get_connection()
-    # и добавляя блоки finally/else для возврата соединения.
-    # Для краткости приведу только один метод, но вы должны применить тот же паттерн ко всем.
-    # Ниже показаны остальные методы с изменениями.
 
     @retry_on_db_error()
     def update_last_active(self, user_id: int):
@@ -112,42 +103,7 @@ class Database:
         else:
             self.pool.putconn(conn)
 
-    @retry_on_db_error()
-    def add_sleep_log(self, user_id: int, sleep_start: datetime = None, sleep_end: datetime = None,
-                      quality: str = None, notes: str = None, triggered_by: str = None):
-        conn = self._get_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO sleep_logs 
-                       (user_id, sleep_start, sleep_end, quality, notes, triggered_by)
-                       VALUES (%s, %s, %s, %s, %s, %s)""",
-                    (user_id, sleep_start, sleep_end, quality, notes, triggered_by)
-                )
-                conn.commit()
-        except Exception:
-            self.pool.putconn(conn)
-            raise
-        else:
-            self.pool.putconn(conn)
-
-    @retry_on_db_error()
-    def add_mood_log(self, user_id: int, stress_level: int, mood: str = None, thoughts_about_use: bool = False):
-        conn = self._get_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """INSERT INTO mood_logs (user_id, stress_level, mood, thoughts_about_use)
-                       VALUES (%s, %s, %s, %s)""",
-                    (user_id, stress_level, mood, thoughts_about_use)
-                )
-                conn.commit()
-        except Exception:
-            self.pool.putconn(conn)
-            raise
-        else:
-            self.pool.putconn(conn)
-
+    # ----- Conversations -----
     @retry_on_db_error()
     def add_conversation(self, user_id: int, role: str, message: str, context_used: dict = None):
         conn = self._get_connection()
@@ -184,14 +140,16 @@ class Database:
         else:
             self.pool.putconn(conn)
 
+    # ----- Long-term memory -----
     @retry_on_db_error()
-    def add_trigger(self, user_id: int, trigger_text: str, category: str = None):
+    def add_memory(self, user_id: int, key: str, value: str):
+        """Сохраняет факт о пользователе."""
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    "INSERT INTO triggers (user_id, trigger_text, category) VALUES (%s, %s, %s)",
-                    (user_id, trigger_text, category)
+                    "INSERT INTO user_memory (user_id, key, value) VALUES (%s, %s, %s)",
+                    (user_id, key, value)
                 )
                 conn.commit()
         except Exception:
@@ -201,18 +159,17 @@ class Database:
             self.pool.putconn(conn)
 
     @retry_on_db_error()
-    def get_sleep_stats(self, user_id: int, days: int = 7):
+    def get_all_memories(self, user_id: int):
+        """Возвращает все сохранённые факты пользователя."""
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    """SELECT sleep_start, sleep_end FROM sleep_logs
-                       WHERE user_id = %s AND sleep_start > NOW() - INTERVAL '1 day' * %s
-                       ORDER BY sleep_start""",
-                    (user_id, days)
+                    "SELECT key, value, created_at FROM user_memory WHERE user_id = %s ORDER BY created_at",
+                    (user_id,)
                 )
                 rows = cur.fetchall()
-                return [{'sleep_start': r[0], 'sleep_end': r[1]} for r in rows]
+                return [{'key': r[0], 'value': r[1], 'created_at': r[2]} for r in rows]
         except Exception:
             self.pool.putconn(conn)
             raise
@@ -220,17 +177,16 @@ class Database:
             self.pool.putconn(conn)
 
     @retry_on_db_error()
-    def get_recent_mood(self, user_id: int, limit: int = 5):
+    def delete_memory(self, user_id: int, key: str):
+        """Удаляет конкретный факт (опционально)."""
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
                 cur.execute(
-                    """SELECT stress_level, mood, thoughts_about_use, timestamp
-                       FROM mood_logs WHERE user_id = %s ORDER BY timestamp DESC LIMIT %s""",
-                    (user_id, limit)
+                    "DELETE FROM user_memory WHERE user_id = %s AND key = %s",
+                    (user_id, key)
                 )
-                rows = cur.fetchall()
-                return [{'stress_level': r[0], 'mood': r[1], 'thoughts_about_use': r[2], 'timestamp': r[3]} for r in rows]
+                conn.commit()
         except Exception:
             self.pool.putconn(conn)
             raise
