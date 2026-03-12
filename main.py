@@ -1,8 +1,9 @@
 import os
 import sys
+import json
 import logging
+import requests
 from flask import Flask, request
-import telebot
 from database_sync import Database
 from ai_integration import HuggingFaceClient
 
@@ -31,37 +32,99 @@ except Exception as e:
     logger.exception("❌ Ошибка инициализации Hugging Face")
     sys.exit(1)
 
-bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# ---------- ПРОСТЕЙШИЙ ОБРАБОТЧИК ДЛЯ ТЕСТА ----------
-@bot.message_handler(func=lambda message: True)
-def handle_message(message):
-    logger.debug("🔥🔥🔥 HANDLE_MESSAGE ВЫЗВАН (ТЕСТ) 🔥🔥🔥")
+TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+def send_message(chat_id: int, text: str):
+    """Отправляет сообщение через Telegram API."""
+    url = f"{TELEGRAM_API_URL}/sendMessage"
+    payload = {
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': 'HTML'
+    }
     try:
-        bot.reply_to(message, "Привет! Это тестовый ответ. Бот работает.")
+        r = requests.post(url, json=payload)
+        r.raise_for_status()
+        logger.debug(f"✅ Сообщение отправлено в чат {chat_id}")
     except Exception as e:
-        logger.exception("Ошибка при отправке ответа")
-    return
+        logger.exception(f"❌ Ошибка отправки сообщения: {e}")
 
-# ---------- ДИАГНОСТИКА ----------
-logger.debug(f"ИТОГО обработчиков: {len(bot.message_handlers)}")
-for i, h in enumerate(bot.message_handlers):
-    logger.debug(f"Финальный обработчик {i}: {h}")
-
-# ---------- ВЕБХУК ----------
 @app.route('/webhook', methods=['POST'])
 def webhook():
-    logger.debug("🔥 Вебхук вызван!")
+    logger.debug("🔥 Вебхук вызван")
     try:
-        json_str = request.get_data().decode('utf-8')
-        logger.debug(f"Получен JSON: {json_str[:200]}...")
-        update = telebot.types.Update.de_json(json_str)
-        bot.process_new_updates([update])
-        logger.debug("✅ process_new_updates завершён")
+        update = request.get_json()
+        logger.debug(f"Получен update: {update}")
     except Exception as e:
-        logger.exception("❌ Ошибка при обработке вебхука")
-        return 'error', 500
+        logger.exception("❌ Ошибка парсинга JSON")
+        return 'error', 400
+
+    # Обрабатываем только сообщения
+    if 'message' not in update:
+        return 'ok', 200
+
+    msg = update['message']
+    chat_id = msg['chat']['id']
+    text = msg.get('text', '')
+    user_telegram_id = msg['from']['id']
+    first_name = msg['from'].get('first_name', '')
+
+    # Получаем или создаём пользователя в БД
+    try:
+        user = db.get_or_create_user(user_telegram_id)
+        user_id = user['id']
+        logger.debug(f"Пользователь {user_id} обработан")
+    except Exception as e:
+        logger.exception("Ошибка работы с БД")
+        send_message(chat_id, "❌ Ошибка доступа к базе данных. Попробуй позже.")
+        return 'ok', 200
+
+    # Сохраняем сообщение пользователя
+    try:
+        db.add_conversation(user_id, 'user', text, None)
+    except Exception as e:
+        logger.exception("Ошибка сохранения диалога")
+
+    # Обработка команды /start
+    if text.startswith('/start'):
+        reply = f"Привет, {first_name}! Я твой помощник по сну, настроению и психологии. Задавай любые вопросы."
+        send_message(chat_id, reply)
+        # Сохраняем ответ ассистента
+        try:
+            db.add_conversation(user_id, 'assistant', reply, None)
+        except Exception as e:
+            logger.exception("Ошибка сохранения ответа")
+        return 'ok', 200
+
+    # Обычное текстовое сообщение
+    if text:
+        # Формируем контекст из последних 5 сообщений
+        context = "Ты — эксперт в области сомнологии, химических зависимостей и психологии. Отвечай кратко и по делу, используя историю диалога.\n\n"
+        try:
+            convs = db.get_recent_conversations(user_id, limit=5)
+            if convs:
+                context += "Последние сообщения:\n"
+                for c in convs:
+                    context += f"{c['role']}: {c['message']}\n"
+        except Exception as e:
+            logger.exception("Ошибка получения истории")
+
+        # Получаем ответ от нейросети
+        try:
+            reply = hf_client.ask(text, context)
+        except Exception as e:
+            logger.exception("Ошибка вызова Hugging Face")
+            reply = "Извини, сейчас я не могу ответить. Попробуй позже."
+
+        send_message(chat_id, reply)
+        # Сохраняем ответ ассистента
+        try:
+            db.add_conversation(user_id, 'assistant', reply, None)
+        except Exception as e:
+            logger.exception("Ошибка сохранения ответа")
+
     return 'ok', 200
 
 @app.route('/')
@@ -69,4 +132,5 @@ def index():
     logger.debug("👋 Корневой путь '/'")
     return "Bot is running!"
 
-logger.info("🎯 main.py загружен")
+if __name__ == '__main__':
+    app.run()
