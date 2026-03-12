@@ -302,7 +302,7 @@ def stats(message):
         else:
             reply += "Нет данных о сне.\n"
 
-        triggers = db.get_recent_triggers? # У нас нет такого метода, но можно добавить позже.
+        triggers = db.get_recent_triggers # У нас нет такого метода, но можно добавить позже.
         # Пока без триггеров в статистике
         bot.reply_to(message, reply, parse_mode='Markdown')
     except Exception as e:
@@ -385,3 +385,4 @@ def index():
     return "Bot is running!"
 
 logger.info("🎯 main.py полностью загружен, ожидаем запросы")
+
