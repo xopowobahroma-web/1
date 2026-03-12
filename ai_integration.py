@@ -11,11 +11,11 @@ class LLMClient:
             logger.error("❌ OPENROUTER_API_KEY не задан!")
             raise ValueError("OPENROUTER_API_KEY не задан")
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
-        # Используем бесплатную модель Hunter Alpha
         self.model = "openrouter/hunter-alpha"
         logger.info(f"✅ LLM Client инициализирован с моделью {self.model}")
 
     def ask(self, user_message: str, context: str) -> str:
+        logger.debug(f"Запрос к OpenRouter: user_message={user_message[:50]}...")
         try:
             response = requests.post(
                 url=self.base_url,
@@ -36,7 +36,10 @@ class LLMClient:
             )
             response.raise_for_status()
             data = response.json()
-            return data['choices'][0]['message']['content']
+            logger.debug(f"Ответ от OpenRouter получен, статус {response.status_code}")
+            content = data['choices'][0]['message']['content']
+            logger.debug(f"Содержимое ответа: {content[:100]}...")
+            return content
         except Exception as e:
             logger.exception(f"❌ Ошибка OpenRouter API: {e}")
             return "Извини, сейчас я временно недоступен. Попробуй позже."
