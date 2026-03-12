@@ -1,7 +1,7 @@
 import os
 import sys
 import logging
-import requests  # <--- добавлен отсутствующий импорт
+import requests
 from flask import Flask, request
 from database_sync import Database
 from ai_integration import LLMClient
@@ -86,28 +86,63 @@ def webhook():
     except Exception as e:
         logger.exception("Ошибка сохранения диалога")
 
-    # Обработка команды /start
+    # --- Команда /remember для сохранения факта ---
+    if text.startswith('/remember'):
+        # Ожидаем формат: /remember ключ: значение
+        try:
+            parts = text.split(':', 1)
+            if len(parts) == 2:
+                key = parts[0].replace('/remember', '').strip()
+                value = parts[1].strip()
+                if key and value:
+                    db.add_memory(user_id, key, value)
+                    send_message(chat_id, f"✅ Запомнил: {key} — {value}")
+                else:
+                    send_message(chat_id, "❌ Используй: /remember ключ: значение")
+            else:
+                send_message(chat_id, "❌ Используй: /remember ключ: значение")
+        except Exception as e:
+            logger.exception("Ошибка при сохранении памяти")
+            send_message(chat_id, "❌ Не удалось сохранить.")
+        return 'ok', 200
+
+    # --- Команда /start ---
     if text.startswith('/start'):
-        reply = f"Привет, {first_name}! Я твой помощник. Задавай любые вопросы."
+        reply = (f"Привет, {first_name}! Я твой помощник.\n"
+                 "Чтобы я запомнил важные факты о тебе (например, историю травм, паттерны), используй команду:\n"
+                 "/remember ключ: значение\n"
+                 "Например: /remember травма: в детстве упал с велосипеда\n\n"
+                 "Я буду помнить эти факты в каждом разговоре.")
         send_message(chat_id, reply)
         try:
             db.add_conversation(user_id, 'assistant', reply, None)
-            logger.debug("Ответ на /start сохранён")
         except Exception as e:
             logger.exception("Ошибка сохранения ответа")
         return 'ok', 200
 
-    # Обычное текстовое сообщение
+    # --- Обычное текстовое сообщение ---
     if text:
-        # Формируем контекст
-        context = "Ты — эксперт в области сомнологии, химических зависимостей и психологии. Отвечай кратко и по делу, используя историю диалога.\n\n"
+        # Формируем контекст: сначала долговременная память, потом последние диалоги
+        context = "Ты — эксперт в области сомнологии, химических зависимостей и психологии. Отвечай кратко и по делу, используя историю диалога и долговременные факты о пользователе.\n\n"
+
+        # Добавляем все сохранённые факты из памяти
+        try:
+            memories = db.get_all_memories(user_id)
+            if memories:
+                context += "Долговременные факты о пользователе:\n"
+                for mem in memories:
+                    context += f"- {mem['key']}: {mem['value']}\n"
+                context += "\n"
+        except Exception as e:
+            logger.exception("Ошибка получения памяти")
+
+        # Добавляем последние сообщения
         try:
             convs = db.get_recent_conversations(user_id, limit=5)
             if convs:
                 context += "Последние сообщения:\n"
                 for c in convs:
                     context += f"{c['role']}: {c['message']}\n"
-            logger.debug("Контекст сформирован")
         except Exception as e:
             logger.exception("Ошибка получения истории")
 
