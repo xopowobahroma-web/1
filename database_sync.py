@@ -1,24 +1,47 @@
 import psycopg2
 from psycopg2 import pool, extras
+from psycopg2 import OperationalError
 from datetime import datetime
 import os
 import logging
+import time
+from functools import wraps
 
 logger = logging.getLogger(__name__)
+
+def retry_on_db_error(max_retries=3, delay=1):
+    """Декоратор для повторных попыток при ошибках базы данных."""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except OperationalError as e:
+                    logger.warning(f"Database error (attempt {attempt+1}/{max_retries}): {e}")
+                    if attempt == max_retries - 1:
+                        raise
+                    time.sleep(delay * (attempt + 1))  # экспоненциальная задержка
+        return wrapper
+    return decorator
 
 class Database:
     def __init__(self):
         self.dsn = os.environ.get('DATABASE_URL') or os.environ.get('SUPABASE_DB_URL')
         if not self.dsn:
             raise ValueError("DATABASE_URL or SUPABASE_DB_URL must be set")
-        # Создаём пул с явным указанием SSL и таймаута
+        # Добавляем параметры для стабильности соединения
         self.pool = psycopg2.pool.SimpleConnectionPool(
             1, 10,
             dsn=self.dsn,
             sslmode='require',
-            connect_timeout=10
+            connect_timeout=20,        # увеличенный таймаут соединения
+            keepalives=1,               # включить TCP keepalive
+            keepalives_idle=30,          # через сколько секунд бездействия начинать keepalive
+            keepalives_interval=10,      # интервал между keepalive-пакетами
+            keepalives_count=5,          # количество попыток keepalive
         )
-        logger.info("Database pool created with SSL")
+        logger.info("Database pool created with SSL and keepalive")
 
     def close(self):
         if self.pool:
@@ -30,7 +53,7 @@ class Database:
             return [desc[0] for desc in cursor.description]
         return []
 
-    # ----- Users -----
+    @retry_on_db_error()
     def get_or_create_user(self, telegram_id: int):
         conn = self.pool.getconn()
         try:
@@ -52,12 +75,21 @@ class Database:
                         return {'id': row[0], 'telegram_id': row[1], 'last_active': row[2]}
                     else:
                         raise Exception("Failed to create user: no row returned")
+        except OperationalError as e:
+            logger.exception(f"Operational error in get_or_create_user: {e}")
+            # Возвращаем соединение в пул, даже если была ошибка
+            self.pool.putconn(conn)
+            raise
         except Exception as e:
-            logger.exception(f"Error in get_or_create_user: {e}")
+            logger.exception(f"Unexpected error in get_or_create_user: {e}")
+            self.pool.putconn(conn)
             raise
         finally:
-            self.pool.putconn(conn)
+            # Соединение возвращается в пул только при успехе, иначе уже вернули
+            pass
 
+    # Аналогично примените декоратор к другим методам, которые работают с БД
+    @retry_on_db_error()
     def update_last_active(self, user_id: int):
         conn = self.pool.getconn()
         try:
@@ -70,7 +102,7 @@ class Database:
         finally:
             self.pool.putconn(conn)
 
-    # ----- Sleep logs -----
+    @retry_on_db_error()
     def add_sleep_log(self, user_id: int, sleep_start: datetime = None, sleep_end: datetime = None,
                       quality: str = None, notes: str = None, triggered_by: str = None):
         conn = self.pool.getconn()
@@ -89,7 +121,7 @@ class Database:
         finally:
             self.pool.putconn(conn)
 
-    # ----- Mood logs -----
+    @retry_on_db_error()
     def add_mood_log(self, user_id: int, stress_level: int, mood: str = None, thoughts_about_use: bool = False):
         conn = self.pool.getconn()
         try:
@@ -106,7 +138,7 @@ class Database:
         finally:
             self.pool.putconn(conn)
 
-    # ----- Conversations -----
+    @retry_on_db_error()
     def add_conversation(self, user_id: int, role: str, message: str, context_used: dict = None):
         conn = self.pool.getconn()
         try:
@@ -123,6 +155,7 @@ class Database:
         finally:
             self.pool.putconn(conn)
 
+    @retry_on_db_error()
     def get_recent_conversations(self, user_id: int, limit: int = 20):
         conn = self.pool.getconn()
         try:
@@ -133,17 +166,15 @@ class Database:
                     (user_id, limit)
                 )
                 rows = cur.fetchall()
-                # Переворачиваем для хронологического порядка
                 rows.reverse()
-                col_names = self._get_columns(cur)
-                return [dict(zip(col_names, row)) for row in rows]
+                return [{'role': r[0], 'message': r[1], 'timestamp': r[2]} for r in rows]
         except Exception as e:
             logger.exception(f"Error in get_recent_conversations: {e}")
             return []
         finally:
             self.pool.putconn(conn)
 
-    # ----- Triggers -----
+    @retry_on_db_error()
     def add_trigger(self, user_id: int, trigger_text: str, category: str = None):
         conn = self.pool.getconn()
         try:
@@ -159,7 +190,7 @@ class Database:
         finally:
             self.pool.putconn(conn)
 
-    # ----- Агрегированные данные для контекста -----
+    @retry_on_db_error()
     def get_sleep_stats(self, user_id: int, days: int = 7):
         conn = self.pool.getconn()
         try:
@@ -171,14 +202,14 @@ class Database:
                     (user_id, days)
                 )
                 rows = cur.fetchall()
-                col_names = self._get_columns(cur)
-                return [dict(zip(col_names, row)) for row in rows]
+                return [{'sleep_start': r[0], 'sleep_end': r[1]} for r in rows]
         except Exception as e:
             logger.exception(f"Error in get_sleep_stats: {e}")
             return []
         finally:
             self.pool.putconn(conn)
 
+    @retry_on_db_error()
     def get_recent_mood(self, user_id: int, limit: int = 5):
         conn = self.pool.getconn()
         try:
@@ -189,8 +220,7 @@ class Database:
                     (user_id, limit)
                 )
                 rows = cur.fetchall()
-                col_names = self._get_columns(cur)
-                return [dict(zip(col_names, row)) for row in rows]
+                return [{'stress_level': r[0], 'mood': r[1], 'thoughts_about_use': r[2], 'timestamp': r[3]} for r in rows]
         except Exception as e:
             logger.exception(f"Error in get_recent_mood: {e}")
             return []
