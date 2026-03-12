@@ -11,7 +11,6 @@ class Database:
         self.dsn = os.environ.get('DATABASE_URL') or os.environ.get('SUPABASE_DB_URL')
         if not self.dsn:
             raise ValueError("DATABASE_URL or SUPABASE_DB_URL must be set")
-        # Создаём пул соединений (минимум 1, максимум 10)
         self.pool = psycopg2.pool.SimpleConnectionPool(1, 10, dsn=self.dsn)
         logger.info("Database pool created")
 
@@ -19,21 +18,20 @@ class Database:
         if self.pool:
             self.pool.closeall()
 
-    def _get_columns(self, cursor):
-        """Возвращает список имён колонок из курсора или пустой список."""
-        if cursor.description:
-            return [desc[0] for desc in cursor.description]
-        return []
-
     # ----- Users -----
     def get_or_create_user(self, telegram_id: int):
         conn = self.pool.getconn()
         try:
             with conn.cursor() as cur:
                 # Пытаемся найти пользователя
-                cur.execute("SELECT * FROM users WHERE telegram_id = %s", (telegram_id,))
+                cur.execute("SELECT id, telegram_id, last_active FROM users WHERE telegram_id = %s", (telegram_id,))
                 row = cur.fetchone()
-                if not row:
+                if row:
+                    # Обновляем время активности
+                    cur.execute("UPDATE users SET last_active = NOW() WHERE telegram_id = %s", (telegram_id,))
+                    conn.commit()
+                    return {'id': row[0], 'telegram_id': row[1], 'last_active': row[2]}
+                else:
                     # Создаём нового
                     cur.execute(
                         "INSERT INTO users (telegram_id, last_active) VALUES (%s, NOW()) RETURNING id, telegram_id, last_active",
@@ -41,16 +39,10 @@ class Database:
                     )
                     row = cur.fetchone()
                     conn.commit()
-                else:
-                    # Обновляем время активности
-                    cur.execute(
-                        "UPDATE users SET last_active = NOW() WHERE telegram_id = %s",
-                        (telegram_id,)
-                    )
-                    conn.commit()
-                # Преобразуем кортеж в словарь
-                col_names = self._get_columns(cur)
-                return dict(zip(col_names, row)) if row else None
+                    if row:
+                        return {'id': row[0], 'telegram_id': row[1], 'last_active': row[2]}
+                    else:
+                        raise Exception("Failed to create user: no row returned")
         except Exception as e:
             logger.exception(f"Error in get_or_create_user: {e}")
             raise
@@ -132,10 +124,8 @@ class Database:
                     (user_id, limit)
                 )
                 rows = cur.fetchall()
-                # Переворачиваем, чтобы получить хронологический порядок
-                rows.reverse()
-                col_names = self._get_columns(cur)
-                return [dict(zip(col_names, row)) for row in rows]
+                rows.reverse()  # хронологический порядок
+                return [{'role': r[0], 'message': r[1], 'timestamp': r[2]} for r in rows]
         except Exception as e:
             logger.exception(f"Error in get_recent_conversations: {e}")
             return []
@@ -170,8 +160,7 @@ class Database:
                     (user_id, days)
                 )
                 rows = cur.fetchall()
-                col_names = self._get_columns(cur)
-                return [dict(zip(col_names, row)) for row in rows]
+                return [{'sleep_start': r[0], 'sleep_end': r[1]} for r in rows]
         except Exception as e:
             logger.exception(f"Error in get_sleep_stats: {e}")
             return []
@@ -188,8 +177,7 @@ class Database:
                     (user_id, limit)
                 )
                 rows = cur.fetchall()
-                col_names = self._get_columns(cur)
-                return [dict(zip(col_names, row)) for row in rows]
+                return [{'stress_level': r[0], 'mood': r[1], 'thoughts_about_use': r[2], 'timestamp': r[3]} for r in rows]
         except Exception as e:
             logger.exception(f"Error in get_recent_mood: {e}")
             return []
