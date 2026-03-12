@@ -10,7 +10,8 @@ class HuggingFaceClient:
         if not self.api_key:
             logger.error("❌ HUGGINGFACE_API_KEY не задан в окружении!")
             raise ValueError("HUGGINGFACE_API_KEY не задан")
-        self.model = os.environ.get('HUGGINGFACE_MODEL', 'Qwen/Qwen2-7B-Instruct')
+        # Используем указанную модель
+       self.model = os.environ.get('HUGGINGFACE_MODEL', 'Qwen/Qwen3.5-397B-A17B')
         self.client = InferenceClient(
             token=self.api_key,
             model=self.model,
@@ -19,7 +20,6 @@ class HuggingFaceClient:
     
     def ask(self, user_message: str, context: str) -> str:
         try:
-            # Формируем промпт в формате, понятном для модели
             prompt = f"{context}\n\nUser: {user_message}\nAssistant:"
             response = self.client.text_generation(
                 prompt,
@@ -31,4 +31,3 @@ class HuggingFaceClient:
         except Exception as e:
             logger.exception(f"Hugging Face API Error: {e}")
             return "Извини, сейчас я временно недоступен. Расскажи, как ты?"
-
