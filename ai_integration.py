@@ -10,8 +10,7 @@ class HuggingFaceClient:
         if not self.api_key:
             logger.error("❌ HUGGINGFACE_API_KEY не задан в окружении!")
             raise ValueError("HUGGINGFACE_API_KEY не задан")
-        # Используем указанную модель
-       self.model = os.environ.get('HUGGINGFACE_MODEL', 'Qwen/Qwen3.5-397B-A17B')
+        self.model = os.environ.get('HUGGINGFACE_MODEL', 'Qwen/Qwen3.5-397B-A17B')
         self.client = InferenceClient(
             token=self.api_key,
             model=self.model,
