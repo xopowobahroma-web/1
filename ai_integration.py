@@ -1,14 +1,16 @@
+import os
 from huggingface_hub import InferenceClient
-from config import settings  # предполагается, что у тебя есть файл config.py с переменными
 import logging
 
 logger = logging.getLogger(__name__)
 
 class HuggingFaceClient:
     def __init__(self):
-        self.api_key = settings.HUGGINGFACE_API_KEY
-        self.model = settings.HUGGINGFACE_MODEL
-        # Используем синхронный клиент
+        self.api_key = os.environ.get('HUGGINGFACE_API_KEY')
+        if not self.api_key:
+            logger.error("❌ HUGGINGFACE_API_KEY не задан в окружении!")
+            raise ValueError("HUGGINGFACE_API_KEY не задан")
+        self.model = os.environ.get('HUGGINGFACE_MODEL', 'Qwen/Qwen2-7B-Instruct')
         self.client = InferenceClient(
             token=self.api_key,
             model=self.model,
@@ -16,9 +18,6 @@ class HuggingFaceClient:
         )
     
     def ask(self, user_message: str, context: str) -> str:
-        """
-        Синхронный запрос к Hugging Face Inference API
-        """
         try:
             messages = [
                 {"role": "system", "content": context},
@@ -37,4 +36,3 @@ class HuggingFaceClient:
         except Exception as e:
             logger.exception(f"Hugging Face API Error: {e}")
             return "Извини, сейчас я временно недоступен. Расскажи, как ты?"
-
