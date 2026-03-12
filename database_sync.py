@@ -10,7 +10,6 @@ from functools import wraps
 logger = logging.getLogger(__name__)
 
 def retry_on_db_error(max_retries=5, delay=1):
-    """Декоратор для повторных попыток при ошибках базы данных."""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -47,10 +46,7 @@ class Database:
             self.pool.closeall()
 
     def _get_connection(self, retries=3):
-        """
-        Возвращает рабочее соединение из пула.
-        При неудаче делает несколько попыток получить новое рабочее соединение.
-        """
+        """Возвращает рабочее соединение из пула с повторными попытками."""
         conn = self.pool.getconn()
         try:
             with conn.cursor() as cur:
@@ -64,12 +60,12 @@ class Database:
                     with conn.cursor() as cur:
                         cur.execute("SELECT 1")
                     logger.debug(f"Successfully got new connection on attempt {attempt+1}")
-                    break
+                    return conn
                 except Exception as e2:
                     logger.warning(f"Attempt {attempt+1} to get new connection failed: {e2}")
                     if attempt == retries - 1:
-                        raise  # не удалось получить рабочее соединение
-                    time.sleep(0.5)  # небольшая пауза перед следующей попыткой
+                        raise
+                    time.sleep(0.5)
         return conn
 
     def _get_columns(self, cursor):
@@ -100,10 +96,7 @@ class Database:
                         return {'id': row[0], 'telegram_id': row[1], 'last_active': row[2]}
                     else:
                         raise Exception("Failed to create user: no row returned")
-        except Exception:
-            self.pool.putconn(conn)
-            raise
-        else:
+        finally:
             self.pool.putconn(conn)
 
     @retry_on_db_error()
@@ -113,10 +106,7 @@ class Database:
             with conn.cursor() as cur:
                 cur.execute("UPDATE users SET last_active = NOW() WHERE id = %s", (user_id,))
                 conn.commit()
-        except Exception:
-            self.pool.putconn(conn)
-            raise
-        else:
+        finally:
             self.pool.putconn(conn)
 
     # ----- Conversations -----
@@ -131,10 +121,7 @@ class Database:
                     (user_id, role, message, extras.Json(context_used) if context_used else None)
                 )
                 conn.commit()
-        except Exception:
-            self.pool.putconn(conn)
-            raise
-        else:
+        finally:
             self.pool.putconn(conn)
 
     @retry_on_db_error()
@@ -150,10 +137,7 @@ class Database:
                 rows = cur.fetchall()
                 rows.reverse()
                 return [{'role': r[0], 'message': r[1], 'timestamp': r[2]} for r in rows]
-        except Exception:
-            self.pool.putconn(conn)
-            raise
-        else:
+        finally:
             self.pool.putconn(conn)
 
     # ----- Long-term memory -----
@@ -167,10 +151,7 @@ class Database:
                     (user_id, key, value)
                 )
                 conn.commit()
-        except Exception:
-            self.pool.putconn(conn)
-            raise
-        else:
+        finally:
             self.pool.putconn(conn)
 
     @retry_on_db_error()
@@ -184,10 +165,7 @@ class Database:
                 )
                 rows = cur.fetchall()
                 return [{'key': r[0], 'value': r[1], 'created_at': r[2]} for r in rows]
-        except Exception:
-            self.pool.putconn(conn)
-            raise
-        else:
+        finally:
             self.pool.putconn(conn)
 
     @retry_on_db_error()
@@ -200,8 +178,5 @@ class Database:
                     (user_id, key)
                 )
                 conn.commit()
-        except Exception:
-            self.pool.putconn(conn)
-            raise
-        else:
+        finally:
             self.pool.putconn(conn)
