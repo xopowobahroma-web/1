@@ -8,25 +8,33 @@ logger = logging.getLogger(__name__)
 
 class Database:
     def __init__(self):
-        # Получаем строку подключения из переменной окружения
         self.dsn = os.environ.get('DATABASE_URL') or os.environ.get('SUPABASE_DB_URL')
         if not self.dsn:
             raise ValueError("DATABASE_URL or SUPABASE_DB_URL must be set")
         # Создаём пул соединений (минимум 1, максимум 10)
         self.pool = psycopg2.pool.SimpleConnectionPool(1, 10, dsn=self.dsn)
+        logger.info("Database pool created")
 
     def close(self):
         if self.pool:
             self.pool.closeall()
+
+    def _get_columns(self, cursor):
+        """Возвращает список имён колонок из курсора или пустой список."""
+        if cursor.description:
+            return [desc[0] for desc in cursor.description]
+        return []
 
     # ----- Users -----
     def get_or_create_user(self, telegram_id: int):
         conn = self.pool.getconn()
         try:
             with conn.cursor() as cur:
+                # Пытаемся найти пользователя
                 cur.execute("SELECT * FROM users WHERE telegram_id = %s", (telegram_id,))
                 row = cur.fetchone()
                 if not row:
+                    # Создаём нового
                     cur.execute(
                         "INSERT INTO users (telegram_id, last_active) VALUES (%s, NOW()) RETURNING id, telegram_id, last_active",
                         (telegram_id,)
@@ -34,14 +42,18 @@ class Database:
                     row = cur.fetchone()
                     conn.commit()
                 else:
+                    # Обновляем время активности
                     cur.execute(
                         "UPDATE users SET last_active = NOW() WHERE telegram_id = %s",
                         (telegram_id,)
                     )
                     conn.commit()
-                # Преобразуем кортеж в словарь с именами колонок
-                col_names = [desc[0] for desc in cur.description]
-                return dict(zip(col_names, row))
+                # Преобразуем кортеж в словарь
+                col_names = self._get_columns(cur)
+                return dict(zip(col_names, row)) if row else None
+        except Exception as e:
+            logger.exception(f"Error in get_or_create_user: {e}")
+            raise
         finally:
             self.pool.putconn(conn)
 
@@ -51,6 +63,9 @@ class Database:
             with conn.cursor() as cur:
                 cur.execute("UPDATE users SET last_active = NOW() WHERE id = %s", (user_id,))
                 conn.commit()
+        except Exception as e:
+            logger.exception(f"Error in update_last_active: {e}")
+            raise
         finally:
             self.pool.putconn(conn)
 
@@ -67,6 +82,9 @@ class Database:
                     (user_id, sleep_start, sleep_end, quality, notes, triggered_by)
                 )
                 conn.commit()
+        except Exception as e:
+            logger.exception(f"Error in add_sleep_log: {e}")
+            raise
         finally:
             self.pool.putconn(conn)
 
@@ -81,6 +99,9 @@ class Database:
                     (user_id, stress_level, mood, thoughts_about_use)
                 )
                 conn.commit()
+        except Exception as e:
+            logger.exception(f"Error in add_mood_log: {e}")
+            raise
         finally:
             self.pool.putconn(conn)
 
@@ -95,6 +116,9 @@ class Database:
                     (user_id, role, message, psycopg2.extras.Json(context_used) if context_used else None)
                 )
                 conn.commit()
+        except Exception as e:
+            logger.exception(f"Error in add_conversation: {e}")
+            raise
         finally:
             self.pool.putconn(conn)
 
@@ -110,8 +134,11 @@ class Database:
                 rows = cur.fetchall()
                 # Переворачиваем, чтобы получить хронологический порядок
                 rows.reverse()
-                col_names = [desc[0] for desc in cur.description]
+                col_names = self._get_columns(cur)
                 return [dict(zip(col_names, row)) for row in rows]
+        except Exception as e:
+            logger.exception(f"Error in get_recent_conversations: {e}")
+            return []
         finally:
             self.pool.putconn(conn)
 
@@ -125,6 +152,9 @@ class Database:
                     (user_id, trigger_text, category)
                 )
                 conn.commit()
+        except Exception as e:
+            logger.exception(f"Error in add_trigger: {e}")
+            raise
         finally:
             self.pool.putconn(conn)
 
@@ -140,8 +170,11 @@ class Database:
                     (user_id, days)
                 )
                 rows = cur.fetchall()
-                col_names = [desc[0] for desc in cur.description]
+                col_names = self._get_columns(cur)
                 return [dict(zip(col_names, row)) for row in rows]
+        except Exception as e:
+            logger.exception(f"Error in get_sleep_stats: {e}")
+            return []
         finally:
             self.pool.putconn(conn)
 
@@ -155,7 +188,10 @@ class Database:
                     (user_id, limit)
                 )
                 rows = cur.fetchall()
-                col_names = [desc[0] for desc in cur.description]
+                col_names = self._get_columns(cur)
                 return [dict(zip(col_names, row)) for row in rows]
+        except Exception as e:
+            logger.exception(f"Error in get_recent_mood: {e}")
+            return []
         finally:
             self.pool.putconn(conn)
