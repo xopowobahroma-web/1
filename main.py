@@ -311,14 +311,13 @@ def stats(message):
         bot.reply_to(message, "Не удалось получить статистику.")
 
 # ---------- ДИАГНОСТИКА РЕГИСТРАЦИИ ОБРАБОТЧИКОВ ----------
-logger.debug(f"Всего обработчиков команд: {len(bot.message_handlers)}")
-for i, handler in enumerate(bot.message_handlers):
-    logger.debug(f"Обработчик {i}: {handler}")
+logger.debug(f"Всего обработчиков команд (до основного): {len(bot.message_handlers)}")
 
 # ---------- ОСНОВНОЙ ОБРАБОТЧИК ТЕКСТОВЫХ СООБЩЕНИЙ ----------
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     logger.debug("🔥🔥🔥 HANDLE_MESSAGE ВЫЗВАН 🔥🔥🔥")
+    # Проверяем, не находится ли пользователь в активном диалоге
     if message.chat.id in sleep_data or message.chat.id in mood_data or message.chat.id in trigger_data:
         logger.debug("Пользователь в диалоге, игнорируем обычный обработчик")
         return
@@ -363,6 +362,13 @@ def webhook():
         json_str = request.get_data().decode('utf-8')
         logger.debug(f"Получен JSON: {json_str[:200]}...")
         update = telebot.types.Update.de_json(json_str)
+        
+        # --- ТЕСТОВЫЙ ОТВЕТ ПРЯМО ИЗ ВЕБХУКА ---
+        if update.message:
+            bot.send_message(update.message.chat.id, "🔧 Тестовый ответ от вебхука!")
+            logger.debug("✅ Тестовый ответ отправлен")
+        # -----------------------------------------
+        
         bot.process_new_updates([update])
         logger.debug("✅ process_new_updates завершён")
     except Exception as e:
@@ -374,5 +380,16 @@ def webhook():
 def index():
     logger.debug("👋 Корневой путь '/'")
     return "Bot is running!"
+
+# ---------- ФИНАЛЬНАЯ ДИАГНОСТИКА ----------
+logger.debug(f"ИТОГО обработчиков: {len(bot.message_handlers)}")
+for i, h in enumerate(bot.message_handlers):
+    # Безопасно выводим информацию об обработчике
+    if 'commands' in h.get('filters', {}):
+        logger.debug(f"Финальный обработчик {i}: команды {h['filters']['commands']}")
+    elif 'func' in h.get('filters', {}):
+        logger.debug(f"Финальный обработчик {i}: функция {h['filters']['func']}")
+    else:
+        logger.debug(f"Финальный обработчик {i}: {h}")
 
 logger.info("🎯 main.py полностью загружен, ожидаем запросы")
