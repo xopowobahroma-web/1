@@ -61,7 +61,6 @@ def webhook():
         logger.exception("❌ Ошибка парсинга JSON")
         return 'error', 400
 
-    # Обрабатываем только сообщения
     if 'message' not in update:
         return 'ok', 200
 
@@ -75,7 +74,7 @@ def webhook():
     try:
         user = db.get_or_create_user(user_telegram_id)
         if user is None:
-            raise Exception("User creation failed")
+            raise Exception("User creation returned None")
         user_id = user['id']
         logger.debug(f"Пользователь {user_id} обработан")
     except Exception as e:
@@ -93,7 +92,6 @@ def webhook():
     if text.startswith('/start'):
         reply = f"Привет, {first_name}! Я твой помощник по сну, настроению и психологии. Задавай любые вопросы."
         send_message(chat_id, reply)
-        # Сохраняем ответ ассистента
         try:
             db.add_conversation(user_id, 'assistant', reply, None)
         except Exception as e:
@@ -102,7 +100,6 @@ def webhook():
 
     # Обычное текстовое сообщение
     if text:
-        # Формируем контекст из последних 5 сообщений
         context = "Ты — эксперт в области сомнологии, химических зависимостей и психологии. Отвечай кратко и по делу, используя историю диалога.\n\n"
         try:
             convs = db.get_recent_conversations(user_id, limit=5)
@@ -113,7 +110,6 @@ def webhook():
         except Exception as e:
             logger.exception("Ошибка получения истории")
 
-        # Получаем ответ от нейросети
         try:
             reply = hf_client.ask(text, context)
         except Exception as e:
@@ -121,7 +117,6 @@ def webhook():
             reply = "Извини, сейчас я не могу ответить. Попробуй позже."
 
         send_message(chat_id, reply)
-        # Сохраняем ответ ассистента
         try:
             db.add_conversation(user_id, 'assistant', reply, None)
         except Exception as e:
@@ -136,4 +131,3 @@ def index():
 
 if __name__ == '__main__':
     app.run()
-
