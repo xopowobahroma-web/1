@@ -19,20 +19,16 @@ class HuggingFaceClient:
     
     def ask(self, user_message: str, context: str) -> str:
         try:
-            messages = [
-                {"role": "system", "content": context},
-                {"role": "user", "content": user_message}
-            ]
-            response = self.client.chat_completion(
-                messages=messages,
-                max_tokens=500,
+            # Формируем промпт в формате, понятном для модели
+            prompt = f"{context}\n\nUser: {user_message}\nAssistant:"
+            response = self.client.text_generation(
+                prompt,
+                max_new_tokens=500,
                 temperature=0.7,
                 top_p=0.9
             )
-            if response and response.choices:
-                return response.choices[0].message.content
-            else:
-                return "Извини, я не получил осмысленного ответа от модели."
+            return response
         except Exception as e:
             logger.exception(f"Hugging Face API Error: {e}")
             return "Извини, сейчас я временно недоступен. Расскажи, как ты?"
+
