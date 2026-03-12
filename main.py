@@ -28,7 +28,7 @@ except Exception as e:
 app = Flask(__name__)
 logger.info("✅ Flask приложение создано")
 
-# --- Обработчики команд с логированием ---
+# --- Обработчики команд (оставляем для теста) ---
 @bot.message_handler(commands=['start'])
 def start(message):
     logger.info(f"🔥🔥🔥 Обработчик start вызван! chat_id={message.chat.id}")
@@ -39,7 +39,7 @@ def echo(message):
     logger.info(f"🔥🔥🔥 Обработчик echo вызван! текст={message.text}")
     bot.reply_to(message, f"Ты написал: {message.text}")
 
-# --- Вебхук ---
+# --- Вебхук с прямым тестовым ответом ---
 @app.route('/webhook', methods=['POST'])
 def webhook():
     logger.debug("🔥 Вебхук вызван!")
@@ -47,7 +47,13 @@ def webhook():
         json_str = request.get_data().decode('utf-8')
         logger.debug(f"Получен JSON: {json_str[:200]}...")
         update = telebot.types.Update.de_json(json_str)
-        logger.debug("✅ Update распарсен, передаём боту...")
+        
+        # ПРЯМОЙ ТЕСТ: отправляем сообщение принудительно
+        if update.message:
+            bot.send_message(update.message.chat.id, "Тестовый ответ от бота!")
+            logger.debug("✅ Тестовое сообщение отправлено")
+        
+        # Затем пробуем штатную обработку
         bot.process_new_updates([update])
         logger.debug("✅ process_new_updates завершён")
     except Exception as e:
