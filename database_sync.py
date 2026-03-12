@@ -10,6 +10,7 @@ from functools import wraps
 logger = logging.getLogger(__name__)
 
 def retry_on_db_error(max_retries=5, delay=1):
+    """Декоратор для повторных попыток при ошибках базы данных."""
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -45,7 +46,11 @@ class Database:
         if self.pool:
             self.pool.closeall()
 
-    def _get_connection(self):
+    def _get_connection(self, retries=3):
+        """
+        Возвращает рабочее соединение из пула.
+        При неудаче делает несколько попыток получить новое рабочее соединение.
+        """
         conn = self.pool.getconn()
         try:
             with conn.cursor() as cur:
@@ -53,7 +58,18 @@ class Database:
         except Exception as e:
             logger.warning(f"Connection {conn} is broken, discarding and getting new one. Error: {e}")
             self.pool.putconn(conn, close=True)
-            conn = self.pool.getconn()
+            for attempt in range(retries):
+                try:
+                    conn = self.pool.getconn()
+                    with conn.cursor() as cur:
+                        cur.execute("SELECT 1")
+                    logger.debug(f"Successfully got new connection on attempt {attempt+1}")
+                    break
+                except Exception as e2:
+                    logger.warning(f"Attempt {attempt+1} to get new connection failed: {e2}")
+                    if attempt == retries - 1:
+                        raise  # не удалось получить рабочее соединение
+                    time.sleep(0.5)  # небольшая пауза перед следующей попыткой
         return conn
 
     def _get_columns(self, cursor):
@@ -143,7 +159,6 @@ class Database:
     # ----- Long-term memory -----
     @retry_on_db_error()
     def add_memory(self, user_id: int, key: str, value: str):
-        """Сохраняет факт о пользователе."""
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
@@ -160,7 +175,6 @@ class Database:
 
     @retry_on_db_error()
     def get_all_memories(self, user_id: int):
-        """Возвращает все сохранённые факты пользователя."""
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
@@ -178,7 +192,6 @@ class Database:
 
     @retry_on_db_error()
     def delete_memory(self, user_id: int, key: str):
-        """Удаляет конкретный факт (опционально)."""
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
