@@ -1,7 +1,7 @@
 import os
 import sys
 import logging
-import requests
+import requests  # <--- добавлен отсутствующий импорт
 from flask import Flask, request
 from database_sync import Database
 from ai_integration import LLMClient
