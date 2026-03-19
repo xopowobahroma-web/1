@@ -11,7 +11,7 @@ class LLMClient:
             logger.error("❌ OPENROUTER_API_KEY не задан!")
             raise ValueError("OPENROUTER_API_KEY не задан")
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
-        self.model = "openrouter/hunter-alpha"
+        self.model = "openrouter/arcee-ai/trinity-large-preview:free"
         logger.info(f"✅ LLM Client инициализирован с моделью {self.model}")
 
     def ask(self, user_message: str, context: str) -> str:
