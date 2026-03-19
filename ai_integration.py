@@ -1,3 +1,4 @@
+
 import os
 import requests
 import logging
@@ -11,6 +12,7 @@ class LLMClient:
             logger.error("❌ OPENROUTER_API_KEY не задан!")
             raise ValueError("OPENROUTER_API_KEY не задан")
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
+        # Используем актуальную бесплатную модель
         self.model = "arcee-ai/trinity-large-preview:free"
         logger.info(f"✅ LLM Client инициализирован с моделью {self.model}")
 
@@ -41,5 +43,8 @@ class LLMClient:
             logger.debug(f"Содержимое ответа: {content[:100]}...")
             return content
         except Exception as e:
+            # Добавляем логирование тела ответа при ошибке
+            if 'response' in locals() and hasattr(response, 'text'):
+                logger.error(f"Тело ответа ошибки OpenRouter: {response.text}")
             logger.exception(f"❌ Ошибка OpenRouter API: {e}")
             return "Извини, сейчас я временно недоступен. Попробуй позже."
