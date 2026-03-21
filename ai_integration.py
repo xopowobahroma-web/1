@@ -1,4 +1,3 @@
-
 import os
 import requests
 import logging
@@ -18,6 +17,7 @@ class LLMClient:
 
     def ask(self, user_message: str, context: str) -> str:
         logger.debug(f"Запрос к OpenRouter: user_message={user_message[:50]}...")
+        response = None  # для безопасной обработки в except
         try:
             response = requests.post(
                 url=self.base_url,
@@ -39,12 +39,22 @@ class LLMClient:
             response.raise_for_status()
             data = response.json()
             logger.debug(f"Ответ от OpenRouter получен, статус {response.status_code}")
-            content = data['choices'][0]['message']['content']
-            logger.debug(f"Содержимое ответа: {content[:100]}...")
-            return content
+
+            # Безопасное извлечение содержимого
+            content = data.get('choices', [{}])[0].get('message', {}).get('content')
+
+            # Логируем, если content None или пустая строка
+            if content:
+                logger.debug(f"Содержимое ответа: {content[:100]}...")
+            else:
+                logger.warning("Ответ OpenRouter не содержит текста (content is None or empty)")
+
+            # Если content всё же None, заменяем на fallback сообщение
+            return content if content else "Извините, я не смог сформулировать ответ. Попробуйте позже."
+
         except Exception as e:
-            # Добавляем логирование тела ответа при ошибке
-            if 'response' in locals() and hasattr(response, 'text'):
+            # Логируем тело ответа, если оно доступно
+            if response is not None:
                 logger.error(f"Тело ответа ошибки OpenRouter: {response.text}")
             logger.exception(f"❌ Ошибка OpenRouter API: {e}")
             return "Извини, сейчас я временно недоступен. Попробуй позже."
