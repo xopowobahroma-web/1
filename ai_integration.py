@@ -11,9 +11,8 @@ class LLMClient:
             logger.error("❌ OPENROUTER_API_KEY не задан!")
             raise ValueError("OPENROUTER_API_KEY не задан")
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
-        # Используем актуальную бесплатную модель
         self.model = "stepfun/step-3.5-flash:free"
-        self.max_tokens = 2575  # Максимальное количество токенов для ответа
+        self.max_tokens = 2575
         logger.info(f"✅ LLM Client инициализирован с моделью {self.model}, max_tokens={self.max_tokens}")
 
     def ask(self, user_message: str, context: str) -> str:
@@ -56,12 +55,10 @@ class LLMClient:
             content = message.get('content')
             reasoning = message.get('reasoning')
 
-            # Если контент пустой, но есть reasoning, используем reasoning
             if not content and reasoning:
                 content = reasoning
                 logger.debug("Использован reasoning вместо content")
 
-            # Если контент всё ещё пуст, анализируем причину
             if not content:
                 if finish_reason == 'length':
                     logger.warning("Ответ OpenRouter не содержит текста из-за превышения лимита токенов.")
