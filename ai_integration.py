@@ -11,7 +11,8 @@ class LLMClient:
             logger.error("❌ OPENROUTER_API_KEY не задан!")
             raise ValueError("OPENROUTER_API_KEY не задан")
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
-        self.model = "stepfun/step-3.5-flash:free"
+        # Используем стабильную бесплатную модель
+        self.model = "google/gemini-2.0-flash-exp:free"
         self.max_tokens = 2575
         logger.info(f"✅ LLM Client инициализирован с моделью {self.model}, max_tokens={self.max_tokens}")
 
@@ -36,6 +37,12 @@ class LLMClient:
                 },
                 timeout=30
             )
+            # Специальная обработка 429
+            if response.status_code == 429:
+                error_data = response.json()
+                logger.warning(f"OpenRouter 429: {error_data}")
+                return "Сервис временно перегружен. Пожалуйста, попробуйте позже."
+
             response.raise_for_status()
             data = response.json()
             logger.debug(f"Ответ от OpenRouter получен, статус {response.status_code}")
@@ -70,7 +77,7 @@ class LLMClient:
             logger.debug(f"Содержимое ответа: {content[:100]}...")
             return content
 
-        except Exception as e:
+        except requests.exceptions.RequestException as e:
             if response is not None:
                 logger.error(f"Тело ответа ошибки OpenRouter: {response.text}")
             logger.exception(f"❌ Ошибка OpenRouter API: {e}")
