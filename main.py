@@ -2,7 +2,6 @@ import os
 import sys
 import logging
 import requests
-import re
 from flask import Flask, request
 from database_sync import Database
 from ai_integration import LLMClient
@@ -39,24 +38,12 @@ TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 # Хранилище для сбора длинных текстов (ключ – chat_id)
 history_buffer = {}
 
-def remove_markdown(text):
-    """Убирает Markdown-разметку из текста"""
-    text = re.sub(r'\*\*', '', text)  # убрать **
-    text = re.sub(r'\*', '', text)    # убрать *
-    text = re.sub(r'`', '', text)     # убрать `
-    text = re.sub(r'__', '', text)    # убрать __
-    text = re.sub(r'_', '', text)     # убрать _
-    text = re.sub(r'~~', '', text)    # убрать ~~
-    text = re.sub(r'!', '', text)    # убрать !
-    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)  # [текст](url) -> текст
-    return text
-
 def send_message(chat_id: int, text: str):
     logger.debug(f"Отправка сообщения в чат {chat_id}: {text[:50]}...")
     url = f"{TELEGRAM_API_URL}/sendMessage"
     
     # Убираем Markdown-разметку
-    clean_text = remove_markdown(text)
+    clean_text = text.replace('**', '').replace('*', '').replace('`', '').replace('_', '').replace('~~', '').replace('![', '').replace('](', ' ').replace(')', '')
     
     payload = {'chat_id': chat_id, 'text': clean_text}
     try:
