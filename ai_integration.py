@@ -12,7 +12,7 @@ class LLMClient:
             raise ValueError("OPENROUTER_API_KEY не задан")
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
         # Используем стабильную бесплатную модель
-        self.model = "google/gemini-2.0-flash-exp:free"
+        self.model = "nousresearch/hermes-3-llama-3.1-405b:free"
         self.max_tokens = 2575
         logger.info(f"✅ LLM Client инициализирован с моделью {self.model}, max_tokens={self.max_tokens}")
 
