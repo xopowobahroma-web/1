@@ -11,37 +11,13 @@ class LLMClient:
             logger.error("❌ OPENROUTER_API_KEY не задан!")
             raise ValueError("OPENROUTER_API_KEY не задан")
         self.base_url = "https://openrouter.ai/api/v1/chat/completions"
-        # Используем модель с большим контекстом
+        # Используем актуальную бесплатную модель
         self.model = "stepfun/step-3.5-flash:free"
-        self.max_tokens = 2000  # Увеличено для больших ответов
-        # Примерный лимит контекста модели (можно уточнить, но для безопасности)
-        self.model_context_limit = 8192  # Предположим 8k
+        self.max_tokens = 2575  # Максимальное количество токенов для ответа
         logger.info(f"✅ LLM Client инициализирован с моделью {self.model}, max_tokens={self.max_tokens}")
-
-    def _truncate_context(self, context: str, user_message: str) -> str:
-        """
-        Грубое усечение системного контекста, чтобы гарантировать место для ответа.
-        Ориентируемся на примерную длину в символах (не точные токены, но проще).
-        """
-        # Оставляем 70% лимита для контекста, 30% для ответа (приблизительно)
-        max_context_chars = int(self.model_context_limit * 0.7 * 3)  # 1 токен ≈ 3 символа
-        if len(context) + len(user_message) > max_context_chars:
-            # Обрезаем системный контекст
-            available = max_context_chars - len(user_message)
-            if available > 100:
-                context = context[:available]
-                logger.warning(f"Системный контекст был обрезан до {len(context)} символов")
-            else:
-                context = "Будь кратким помощником."
-        return context
 
     def ask(self, user_message: str, context: str) -> str:
         logger.debug(f"Запрос к OpenRouter: user_message={user_message[:50]}...")
-
-        # Если контекст подозрительно длинный, обрезаем
-        if len(context) > 6000:
-            context = self._truncate_context(context, user_message)
-
         response = None
         try:
             response = requests.post(
