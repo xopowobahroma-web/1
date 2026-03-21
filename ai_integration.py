@@ -11,7 +11,7 @@ class LLMClient:
         if not self.api_key:
             logger.error("❌ OPENROUTER_API_KEY не задан!")
             raise ValueError("OPENROUTER_API_KEY не задан")
-        self.base_url = "https://openrouter.ai/api/v1/chat/completions"
+        self.base_url = "stepfun/step-3.5-flash:free"
         # модель не меняем
         self.model = "nousresearch/hermes-3-llama-3.1-405b:free"
         self.max_tokens = 2575
