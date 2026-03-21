@@ -2,6 +2,7 @@ import os
 import sys
 import logging
 import requests
+import re
 from flask import Flask, request
 from database_sync import Database
 from ai_integration import LLMClient
@@ -23,7 +24,7 @@ if not BOT_TOKEN:
     logger.error("❌ BOT_TOKEN не задан!")
     sys.exit(1)
 
-# --- LLM клиент (OpenRouter) ---
+# --- LLM клиент (Mistral) ---
 try:
     llm_client = LLMClient()
     logger.info("✅ LLM клиент инициализирован")
@@ -38,10 +39,26 @@ TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 # Хранилище для сбора длинных текстов (ключ – chat_id)
 history_buffer = {}
 
+def remove_markdown(text):
+    """Убирает Markdown-разметку из текста"""
+    text = re.sub(r'\*\*', '', text)  # убрать **
+    text = re.sub(r'\*', '', text)    # убрать *
+    text = re.sub(r'`', '', text)     # убрать `
+    text = re.sub(r'__', '', text)    # убрать __
+    text = re.sub(r'_', '', text)     # убрать _
+    text = re.sub(r'~~', '', text)    # убрать ~~
+    text = re.sub(r'!', '', text)    # убрать !
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)  # [текст](url) -> текст
+    return text
+
 def send_message(chat_id: int, text: str):
     logger.debug(f"Отправка сообщения в чат {chat_id}: {text[:50]}...")
     url = f"{TELEGRAM_API_URL}/sendMessage"
-    payload = {'chat_id': chat_id, 'text': text, 'parse_mode': 'HTML'}
+    
+    # Убираем Markdown-разметку
+    clean_text = remove_markdown(text)
+    
+    payload = {'chat_id': chat_id, 'text': clean_text}
     try:
         r = requests.post(url, json=payload, timeout=5)
         r.raise_for_status()
@@ -146,9 +163,9 @@ def webhook():
     # --- Команда /start ---
     if text.startswith('/start'):
         reply = (f"Привет, {first_name}! Я твой помощник.\n\n"
-                 "📌 **Как я могу помочь?**\n"
+                 "📌 Как я могу помочь?\n"
                  "Я помню историю диалога и могу запоминать важные факты о тебе.\n\n"
-                 "**Команды:**\n"
+                 "Команды:\n"
                  "/remember ключ: значение – сохранить один факт\n"
                  "/remember_start – начать ввод длинной истории (например, биографии)\n"
                  "/remember_stop [ключ] – закончить ввод и сохранить историю\n\n"
