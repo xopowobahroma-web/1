@@ -17,7 +17,7 @@ class LLMClient:
 
     def ask(self, user_message: str, context: str) -> str:
         logger.debug(f"Запрос к OpenRouter: user_message={user_message[:50]}...")
-        response = None  # для безопасной обработки в except
+        response = None
         try:
             response = requests.post(
                 url=self.base_url,
@@ -40,17 +40,29 @@ class LLMClient:
             data = response.json()
             logger.debug(f"Ответ от OpenRouter получен, статус {response.status_code}")
 
+            # Проверяем наличие ошибки в ответе
+            if 'error' in data:
+                logger.error(f"OpenRouter вернул ошибку: {data['error']}")
+                return "Извини, сейчас я временно недоступен. Попробуй позже."
+
             # Безопасное извлечение содержимого
-            content = data.get('choices', [{}])[0].get('message', {}).get('content')
-
-            # Логируем, если content None или пустая строка
-            if content:
-                logger.debug(f"Содержимое ответа: {content[:100]}...")
+            choices = data.get('choices')
+            if choices and len(choices) > 0:
+                message = choices[0].get('message')
+                if message:
+                    content = message.get('content')
+                else:
+                    content = None
             else:
-                logger.warning("Ответ OpenRouter не содержит текста (content is None or empty)")
+                content = None
 
-            # Если content всё же None, заменяем на fallback сообщение
-            return content if content else "Извините, я не смог сформулировать ответ. Попробуйте позже."
+            # Если content отсутствует, логируем полный ответ для отладки
+            if not content:
+                logger.warning(f"Ответ OpenRouter не содержит текста. Полный ответ: {data}")
+                return "Извините, я не смог сформулировать ответ. Попробуйте позже."
+
+            logger.debug(f"Содержимое ответа: {content[:100]}...")
+            return content
 
         except Exception as e:
             # Логируем тело ответа, если оно доступно
